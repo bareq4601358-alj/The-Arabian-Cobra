@@ -17,6 +17,7 @@
       flex-direction: column;
       color: #ffd700;
       touch-action: none;
+      overflow: hidden; /* Prevents scrolling */
     }
     h1 {
       margin: 10px 0 8px 0;
@@ -42,6 +43,7 @@
       grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
       width: 220px;
+      display: none; /* Hidden by default */
     }
     .btn {
       background: rgba(255, 215, 0, 0.2);
@@ -86,6 +88,14 @@
       font-weight: bold;
       width: 100%;
     }
+
+    /* Show buttons only on mobile */
+    @media (max-width: 768px) {
+      .controls {
+        display: grid;
+      }
+      h1 { font-size: 2.2rem; }
+    }
   </style>
 </head>
 <body>
@@ -93,7 +103,7 @@
   <div id="scoreDisplay">Score: 0 &nbsp;&nbsp;&nbsp; Best: 0</div>
   <canvas id="gameCanvas" tabindex="0"></canvas>
 
-  <!-- On-screen controls -->
+  <!-- On-screen controls (only visible on mobile) -->
   <div class="controls" id="mobileControls">
     <div></div>
     <div class="btn" id="up">↑</div>
@@ -142,7 +152,7 @@
       dx = 1; dy = 0;
       pendingDx = 1; pendingDy = 0;
       score = 0;
-      gameSpeed = 95;           // Balanced speed
+      gameSpeed = 95;
       gameRunning = true;
       lastMoveTime = Date.now();
       randomFood();
@@ -240,7 +250,7 @@
       }
     });
 
-    // On-screen Buttons
+    // On-screen Buttons (Mobile only)
     function setupButtons() {
       document.getElementById('up').addEventListener('touchstart', e => { e.preventDefault(); if (dy !== 1) { pendingDx = 0; pendingDy = -1; }});
       document.getElementById('down').addEventListener('touchstart', e => { e.preventDefault(); if (dy !== -1) { pendingDx = 0; pendingDy = 1; }});
