@@ -26,7 +26,6 @@
     #scoreDisplay {
       font-size: 1.5rem;
       margin-bottom: 10px;
-      letter-spacing: 1px;
     }
     canvas {
       border: 5px solid #ffd700;
@@ -36,7 +35,29 @@
       outline: none;
       touch-action: none;
       max-width: 95vw;
-      max-height: 70vh;
+    }
+    .controls {
+      margin-top: 15px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      width: 220px;
+    }
+    .btn {
+      background: rgba(255, 215, 0, 0.2);
+      color: #ffd700;
+      border: 2px solid #ffd700;
+      border-radius: 12px;
+      padding: 18px;
+      font-size: 1.4rem;
+      text-align: center;
+      user-select: none;
+      touch-action: manipulation;
+    }
+    .btn:active {
+      background: #ffd700;
+      color: #0a0500;
+      transform: scale(0.95);
     }
     .game-over {
       position: absolute;
@@ -64,11 +85,6 @@
       cursor: pointer;
       font-weight: bold;
       width: 100%;
-      max-width: 220px;
-    }
-    button:hover {
-      background: #ffed8f;
-      transform: scale(1.05);
     }
   </style>
 </head>
@@ -76,6 +92,19 @@
   <h1>YALLA HABIBI 🐍</h1>
   <div id="scoreDisplay">Score: 0 &nbsp;&nbsp;&nbsp; Best: 0</div>
   <canvas id="gameCanvas" tabindex="0"></canvas>
+
+  <!-- On-screen controls for mobile -->
+  <div class="controls" id="mobileControls">
+    <div></div>
+    <div class="btn" id="up">↑</div>
+    <div></div>
+    <div class="btn" id="left">←</div>
+    <div></div>
+    <div class="btn" id="right">→</div>
+    <div></div>
+    <div class="btn" id="down">↓</div>
+    <div></div>
+  </div>
 
   <div class="game-over" id="gameOverScreen">
     <h2>GAME OVER</h2>
@@ -89,6 +118,7 @@
     const scoreDisplay = document.getElementById('scoreDisplay');
     const gameOverScreen = document.getElementById('gameOverScreen');
     const finalScoreEl = document.getElementById('finalScore');
+    const mobileControls = document.getElementById('mobileControls');
 
     let grid = 20;
     let cols, rows;
@@ -99,11 +129,10 @@
     highScore = localStorage.getItem('yallaHabibiHS') || 0;
 
     function resizeCanvas() {
-      const maxSize = Math.min(window.innerWidth * 0.92, window.innerHeight * 0.65, 640);
-      const newSize = Math.floor(maxSize / grid) * grid; // Make it divisible by grid
-      
-      canvas.width = newSize;
-      canvas.height = newSize;
+      let size = Math.min(window.innerWidth * 0.92, 580);
+      size = Math.floor(size / grid) * grid;
+      canvas.width = size;
+      canvas.height = size;
       cols = canvas.width / grid;
       rows = canvas.height / grid;
     }
@@ -114,7 +143,7 @@
       dx = 1; dy = 0;
       pendingDx = 1; pendingDy = 0;
       score = 0;
-      gameSpeed = 85;
+      gameSpeed = 100;           // Slower & smoother on mobile
       gameRunning = true;
       lastMoveTime = Date.now();
       randomFood();
@@ -131,7 +160,7 @@
           x: Math.floor(Math.random() * cols),
           y: Math.floor(Math.random() * rows)
         };
-      } while (snake.some(segment => segment.x === food.x && segment.y === food.y));
+      } while (snake.some(s => s.x === food.x && s.y === food.y));
     }
 
     function draw() {
@@ -152,7 +181,7 @@
       const head = { x: snake[0].x + dx, y: snake[0].y + dy };
 
       if (head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows ||
-          snake.some(segment => segment.x === head.x && segment.y === head.y)) {
+          snake.some(s => s.x === head.x && s.y === head.y)) {
         gameOver();
         return;
       }
@@ -162,7 +191,7 @@
       if (head.x === food.x && head.y === food.y) {
         score += 10;
         updateScoreDisplay();
-        if (gameSpeed > 45) gameSpeed -= 2;
+        if (gameSpeed > 55) gameSpeed -= 1.5;
         randomFood();
       } else {
         snake.pop();
@@ -171,9 +200,9 @@
       ctx.fillStyle = '#0a0500';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      snake.forEach((segment, i) => {
+      snake.forEach((s, i) => {
         ctx.fillStyle = i === 0 ? '#ffd700' : '#b8860b';
-        ctx.fillRect(segment.x * grid + 1, segment.y * grid + 1, grid - 2, grid - 2);
+        ctx.fillRect(s.x * grid + 1, s.y * grid + 1, grid - 2, grid - 2);
       });
 
       ctx.fillStyle = '#ce1126';
@@ -201,7 +230,7 @@
       draw();
     }
 
-    // Keyboard Controls
+    // Keyboard
     document.addEventListener('keydown', e => {
       if (!gameRunning) return;
       switch(e.key) {
@@ -212,39 +241,24 @@
       }
     });
 
-    // Mobile Swipe Controls
-    let touchStartX = 0, touchStartY = 0;
-    canvas.addEventListener('touchstart', e => {
-      touchStartX = e.changedTouches[0].screenX;
-      touchStartY = e.changedTouches[0].screenY;
-    });
+    // On-screen Buttons
+    function setupButtons() {
+      document.getElementById('up').addEventListener('touchstart', () => { if (dy !== 1) { pendingDx = 0; pendingDy = -1; }});
+      document.getElementById('down').addEventListener('touchstart', () => { if (dy !== -1) { pendingDx = 0; pendingDy = 1; }});
+      document.getElementById('left').addEventListener('touchstart', () => { if (dx !== 1) { pendingDx = -1; pendingDy = 0; }});
+      document.getElementById('right').addEventListener('touchstart', () => { if (dx !== -1) { pendingDx = 1; pendingDy = 0; }});
+    }
 
-    canvas.addEventListener('touchend', e => {
-      if (!gameRunning) return;
-      const diffX = e.changedTouches[0].screenX - touchStartX;
-      const diffY = e.changedTouches[0].screenY - touchStartY;
-
-      if (Math.abs(diffX) > Math.abs(diffY)) {
-        if (diffX > 40 && dx !== -1) { pendingDx = 1; pendingDy = 0; }
-        else if (diffX < -40 && dx !== 1) { pendingDx = -1; pendingDy = 0; }
-      } else {
-        if (diffY > 40 && dy !== -1) { pendingDx = 0; pendingDy = 1; }
-        else if (diffY < -40 && dy !== 1) { pendingDx = 0; pendingDy = -1; }
-      }
-    });
-
-    // Start Game
+    // Start
     window.onload = () => {
       initGame();
+      setupButtons();
       canvas.focus();
       draw();
     };
 
-    // Handle screen resize
     window.addEventListener('resize', () => {
-      if (gameRunning) {
-        initGame();
-      }
+      if (gameRunning) initGame();
     });
   </script>
 </body>
