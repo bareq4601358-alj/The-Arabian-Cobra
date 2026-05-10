@@ -49,7 +49,7 @@
       border: 2px solid #ffd700;
       border-radius: 12px;
       padding: 18px;
-      font-size: 1.4rem;
+      font-size: 1.5rem;
       text-align: center;
       user-select: none;
       touch-action: manipulation;
@@ -93,7 +93,7 @@
   <div id="scoreDisplay">Score: 0 &nbsp;&nbsp;&nbsp; Best: 0</div>
   <canvas id="gameCanvas" tabindex="0"></canvas>
 
-  <!-- On-screen controls for mobile -->
+  <!-- On-screen controls -->
   <div class="controls" id="mobileControls">
     <div></div>
     <div class="btn" id="up">↑</div>
@@ -118,7 +118,6 @@
     const scoreDisplay = document.getElementById('scoreDisplay');
     const gameOverScreen = document.getElementById('gameOverScreen');
     const finalScoreEl = document.getElementById('finalScore');
-    const mobileControls = document.getElementById('mobileControls');
 
     let grid = 20;
     let cols, rows;
@@ -143,7 +142,7 @@
       dx = 1; dy = 0;
       pendingDx = 1; pendingDy = 0;
       score = 0;
-      gameSpeed = 100;           // Slower & smoother on mobile
+      gameSpeed = 95;           // Balanced speed
       gameRunning = true;
       lastMoveTime = Date.now();
       randomFood();
@@ -230,7 +229,7 @@
       draw();
     }
 
-    // Keyboard
+    // Keyboard Controls
     document.addEventListener('keydown', e => {
       if (!gameRunning) return;
       switch(e.key) {
@@ -243,13 +242,13 @@
 
     // On-screen Buttons
     function setupButtons() {
-      document.getElementById('up').addEventListener('touchstart', () => { if (dy !== 1) { pendingDx = 0; pendingDy = -1; }});
-      document.getElementById('down').addEventListener('touchstart', () => { if (dy !== -1) { pendingDx = 0; pendingDy = 1; }});
-      document.getElementById('left').addEventListener('touchstart', () => { if (dx !== 1) { pendingDx = -1; pendingDy = 0; }});
-      document.getElementById('right').addEventListener('touchstart', () => { if (dx !== -1) { pendingDx = 1; pendingDy = 0; }});
+      document.getElementById('up').addEventListener('touchstart', e => { e.preventDefault(); if (dy !== 1) { pendingDx = 0; pendingDy = -1; }});
+      document.getElementById('down').addEventListener('touchstart', e => { e.preventDefault(); if (dy !== -1) { pendingDx = 0; pendingDy = 1; }});
+      document.getElementById('left').addEventListener('touchstart', e => { e.preventDefault(); if (dx !== 1) { pendingDx = -1; pendingDy = 0; }});
+      document.getElementById('right').addEventListener('touchstart', e => { e.preventDefault(); if (dx !== -1) { pendingDx = 1; pendingDy = 0; }});
     }
 
-    // Start
+    // Start Game
     window.onload = () => {
       initGame();
       setupButtons();
