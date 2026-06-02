@@ -144,7 +144,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      touch-action: manipulation;
+      touch-action: none;
       cursor: pointer;
       min-height: 72px;
       min-width: 72px;
@@ -218,30 +218,32 @@
       .hud {
         width: 100%;
         font-size: clamp(0.9rem, 3.2vw, 1.05rem);
-        margin-bottom: 6px;
+        margin-bottom: 4px;
         padding: 0 2px;
       }
 
       .board-wrap {
-        flex: 1 1 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
+        flex: 0 1 auto;
+        align-self: center;
+        margin: 0 auto;
         min-height: 0;
+        max-width: 100%;
         overflow: hidden;
       }
 
       canvas {
         touch-action: none;
+        display: block;
         max-width: 100%;
+        max-height: 100%;
       }
 
       .controls {
         display: grid;
         flex: 0 0 auto;
-        margin-top: 0;
-        padding-top: 8px;
+        margin-top: auto;
+        align-self: center;
+        padding-top: 10px;
         grid-template-columns: repeat(3, minmax(58px, 1fr));
         grid-template-rows: repeat(3, minmax(58px, 1fr));
         gap: 6px;
@@ -297,8 +299,11 @@
   </div>
 
   <script>
-    const COLS = 37;
-    const ROWS = 27;
+    const DESKTOP_COLS = 37;
+    const DESKTOP_ROWS = 27;
+    const MOBILE_TARGET_CELL = 17;
+    let COLS = DESKTOP_COLS;
+    let ROWS = DESKTOP_ROWS;
     const GROWTH_PER_APPLE = 4;
     const MAX_SCORE = 999;
     const BASE_TICK_MS = 88;
@@ -314,29 +319,53 @@
     const mobileControls = document.getElementById("mobileControls");
 
     const isMobileLayout = () => window.matchMedia("(max-width: 768px), (hover: none) and (pointer: coarse)").matches;
-    const MOBILE_BOARD_HEIGHT_RATIO = 0.84;
     let layoutPass = 0;
     let layoutTimer = null;
+    let playCellSize = null;
 
     function getMobileEntityScale() {
-      if (!isMobileLayout()) return 1;
-      const vh = window.visualViewport?.height || window.innerHeight;
-      const vw = window.visualViewport?.width || window.innerWidth;
-      const screenFactor = Math.min(vh / 580, vw / 320);
-      return Math.min(1.34, Math.max(1.16, 1.02 + screenFactor * 0.18));
+      // On mobile the grid uses larger cells; scale the snake down so its
+      // on-screen size matches the original look. Desktop is unchanged (1).
+      return isMobileLayout() ? 0.6 : 1;
     }
 
-    function applyMobileCanvasDisplayScale() {
-      const boardWrap = document.querySelector(".board-wrap");
-      if (!isMobileLayout() || !boardWrap || !canvas.width) {
-        canvas.style.transform = "";
+    function getMobileAppleScale() {
+      // Apple sits a bit larger than the snake's scale so it stays easy to
+      // see, without becoming oversized. Desktop is unchanged (1).
+      return isMobileLayout() ? 0.82 : 1;
+    }
+
+    function syncHudWidth(px) {
+      const hud = document.querySelector(".hud");
+      if (!hud) return;
+      if (px && isMobileLayout()) {
+        hud.style.width = `${px}px`;
+        hud.style.marginLeft = "auto";
+        hud.style.marginRight = "auto";
+      } else {
+        hud.style.width = "";
+        hud.style.marginLeft = "";
+        hud.style.marginRight = "";
+      }
+    }
+
+    function configureGrid() {
+      if (!isMobileLayout()) {
+        COLS = DESKTOP_COLS;
+        ROWS = DESKTOP_ROWS;
         return;
       }
-      const scaleX = boardWrap.clientWidth / canvas.width;
-      const scaleY = boardWrap.clientHeight / canvas.height;
-      const displayScale = Math.min(scaleX, scaleY);
-      canvas.style.transform = displayScale > 1.01 ? `scale(${displayScale})` : "";
-      canvas.style.transformOrigin = "center center";
+      const { availableWidth, availableHeight } = getMobileLayoutMetrics();
+      const cols = Math.round(availableWidth / MOBILE_TARGET_CELL);
+      const rows = Math.round(availableHeight / MOBILE_TARGET_CELL);
+      COLS = Math.min(30, Math.max(13, cols));
+      ROWS = Math.min(42, Math.max(17, rows));
+    }
+
+    function saveHighScore() {
+      try {
+        localStorage.setItem("arabianCobraHS", String(highScore));
+      } catch (_) {}
     }
 
     let cellSize = 20;
@@ -360,8 +389,15 @@
     let tickMs = BASE_TICK_MS;
     let accum = 0;
     let lastFrame = 0;
-    let gameState = "start"; // start | playing | gameover | win
+    let gameState = "start"; // start | playing | dying | gameover | win
     let inputQueue = [];
+    let gameOverTimer = null;
+    const DEATH_FREEZE_MS = 380;
+
+    let headGradient = null;
+    let headGradientKey = "";
+    let appleGradient = null;
+    let appleGradientKey = "";
 
     bestDisplay.textContent = `Best: ${highScore}`;
 
@@ -376,7 +412,6 @@
       const shell = document.querySelector(".game-shell");
       const header = document.querySelector(".game-header");
       const controls = document.getElementById("mobileControls");
-      const boardWrap = document.querySelector(".board-wrap");
       const shellStyles = shell ? getComputedStyle(shell) : null;
       const shellPaddingX = shellStyles
         ? parseFloat(shellStyles.paddingLeft) + parseFloat(shellStyles.paddingRight)
@@ -386,7 +421,7 @@
         : 0;
       const headerHeight = header ? header.offsetHeight : 0;
       const controlsVisible = controls && getComputedStyle(controls).display !== "none";
-      const controlsHeight = controlsVisible ? controls.offsetHeight + 8 : 0;
+      const controlsHeight = controlsVisible ? controls.offsetHeight : 0;
       const viewportWidth = window.visualViewport
         ? window.visualViewport.width
         : window.innerWidth;
@@ -394,38 +429,45 @@
         ? window.visualViewport.height
         : window.innerHeight;
 
-      if (boardWrap && boardWrap.clientWidth > 0 && boardWrap.clientHeight > 0) {
-        return {
-          availableWidth: boardWrap.clientWidth - 6,
-          availableHeight: (boardWrap.clientHeight - 6) * MOBILE_BOARD_HEIGHT_RATIO,
-        };
-      }
+      const borderAllowance = 6; // board-wrap 3px border on each side
+      const gap = 14; // small breathing room around the board
 
       return {
-        availableWidth: Math.max(240, viewportWidth - shellPaddingX - 6),
+        availableWidth: Math.max(120, viewportWidth - shellPaddingX - borderAllowance),
         availableHeight: Math.max(
-          160,
-          (viewportHeight - shellPaddingY - headerHeight - controlsHeight - 8) * MOBILE_BOARD_HEIGHT_RATIO
+          120,
+          viewportHeight - shellPaddingY - headerHeight - controlsHeight - borderAllowance - gap
         ),
       };
     }
 
-    function resizeCanvas() {
+    function resizeCanvas(force = false) {
+      if ((gameState === "playing" || gameState === "dying") && playCellSize !== null && !force) {
+        cellSize = playCellSize;
+        return;
+      }
+
       if (isMobileLayout()) {
         const { availableWidth, availableHeight } = getMobileLayoutMetrics();
-        cellSize = Math.max(7, Math.floor(Math.min(availableWidth / COLS, availableHeight / ROWS)));
+        cellSize = Math.max(6, Math.floor(Math.min(availableWidth / COLS, availableHeight / ROWS)));
         if (!Number.isFinite(cellSize) || cellSize <= 0) {
-          cellSize = 7;
+          cellSize = 6;
         }
-        canvas.width = COLS * cellSize;
-        canvas.height = ROWS * cellSize;
-        canvas.style.width = `${canvas.width}px`;
-        canvas.style.height = `${canvas.height}px`;
-        applyMobileCanvasDisplayScale();
 
-        if (layoutPass < 2 && document.querySelector(".board-wrap")?.clientHeight === 0) {
+        const nextWidth = COLS * cellSize;
+        const nextHeight = ROWS * cellSize;
+        if (force || canvas.width !== nextWidth || canvas.height !== nextHeight) {
+          canvas.width = nextWidth;
+          canvas.height = nextHeight;
+        }
+        canvas.style.width = `${nextWidth}px`;
+        canvas.style.height = `${nextHeight}px`;
+        canvas.style.transform = "";
+        syncHudWidth(nextWidth);
+
+        if (layoutPass < 2 && (availableHeight < 130 || availableWidth < 130)) {
           layoutPass += 1;
-          requestAnimationFrame(resizeCanvas);
+          requestAnimationFrame(() => resizeCanvas(force));
         } else {
           layoutPass = 0;
         }
@@ -433,13 +475,19 @@
       }
 
       layoutPass = 0;
+      playCellSize = null;
       canvas.style.transform = "";
+      syncHudWidth(null);
 
       const maxWidth = Math.min(window.innerWidth * 0.95, 740);
       const maxHeight = Math.min(window.innerHeight * 0.62, 540);
       cellSize = Math.max(10, Math.floor(Math.min(maxWidth / COLS, maxHeight / ROWS)));
-      canvas.width = COLS * cellSize;
-      canvas.height = ROWS * cellSize;
+      const nextWidth = COLS * cellSize;
+      const nextHeight = ROWS * cellSize;
+      if (force || canvas.width !== nextWidth || canvas.height !== nextHeight) {
+        canvas.width = nextWidth;
+        canvas.height = nextHeight;
+      }
       canvas.style.width = "";
       canvas.style.height = "";
     }
@@ -449,6 +497,7 @@
     }
 
     function resetRound() {
+      configureGrid();
       const startX = Math.floor(COLS / 2);
       const startY = Math.floor(ROWS / 2);
       snake = [
@@ -469,6 +518,8 @@
       tickMs = BASE_TICK_MS;
       accum = 0;
       lastFrame = 0;
+      clearTimeout(gameOverTimer);
+      gameOverTimer = null;
       spawnFood();
       updateScoreDisplay();
     }
@@ -499,24 +550,36 @@
     }
 
     function queueDirection(nx, ny) {
+      if (gameState !== "playing") return;
+      if (nx === 0 && ny === 0) return;
+
       const last = inputQueue.length
         ? inputQueue[inputQueue.length - 1]
-        : { x: pendingDx, y: pendingDy };
+        : { x: dx, y: dy };
       if (last.x === -nx && last.y === -ny) return;
       if (last.x === nx && last.y === ny) return;
       inputQueue.push({ x: nx, y: ny });
-      if (inputQueue.length > 3) inputQueue.shift();
+      if (inputQueue.length > 2) inputQueue.shift();
     }
 
     function applyQueuedInput() {
-      while (inputQueue.length) {
-        const next = inputQueue.shift();
-        if (!(next.x === -dx && next.y === -dy)) {
-          pendingDx = next.x;
-          pendingDy = next.y;
-          break;
-        }
+      if (!inputQueue.length) return;
+
+      const next = inputQueue.shift();
+      if (next.x === -dx && next.y === -dy) return;
+
+      pendingDx = next.x;
+      pendingDy = next.y;
+    }
+
+    function willCollideWithBody(head) {
+      const tailIndex = snake.length - 1;
+      for (let i = 1; i < snake.length; i += 1) {
+        const tailWillMove = growthLeft <= 0 && snake.length > 1;
+        if (i === tailIndex && tailWillMove) continue;
+        if (snake[i].x === head.x && snake[i].y === head.y) return true;
       }
+      return false;
     }
 
     function stepGame() {
@@ -529,15 +592,17 @@
 
       const head = { x: snake[0].x + dx, y: snake[0].y + dy };
 
-      if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
-        endGame(false);
+      const hitWall = head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS;
+      if (hitWall) {
+        snake.unshift(head);
+        beginDeath(false);
         return;
       }
 
       const willEat = head.x === food.x && head.y === food.y;
-      const body = snake.slice(0, -1);
-      if (body.some((segment) => segment.x === head.x && segment.y === head.y)) {
-        endGame(false);
+      if (willCollideWithBody(head)) {
+        snake.unshift(head);
+        beginDeath(false);
         return;
       }
 
@@ -552,7 +617,7 @@
         ensureFoodNotOnSnake();
 
         if (score >= MAX_SCORE) {
-          endGame(true);
+          beginDeath(true);
           return;
         }
       }
@@ -573,13 +638,24 @@
       ensureFoodNotOnSnake();
     }
 
-    function endGame(won) {
-      gameState = won ? "win" : "gameover";
+    function beginDeath(won) {
+      gameState = won ? "win" : "dying";
+      retiringTail = null;
+      tailAnchor = null;
       if (score > highScore) {
         highScore = score;
-        localStorage.setItem("arabianCobraHS", highScore);
+        saveHighScore();
       }
       updateScoreDisplay();
+
+      clearTimeout(gameOverTimer);
+      gameOverTimer = setTimeout(() => finalizeGameOver(won), DEATH_FREEZE_MS);
+    }
+
+    function finalizeGameOver(won) {
+      gameState = won ? "win" : "gameover";
+      playCellSize = null;
+      resizeCanvas();
       finalScoreEl.innerHTML = won
         ? `You filled the board!<br>Score: ${score}`
         : `Score: ${score}<br>Best: ${highScore}`;
@@ -591,14 +667,10 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    function lerp(a, b, t) {
-      return a + (b - a) * t;
-    }
-
     function drawApple() {
       const cx = food.x * cellSize + cellSize / 2;
       const cy = food.y * cellSize + cellSize / 2;
-      const entityScale = getMobileEntityScale();
+      const entityScale = getMobileAppleScale();
       const radius = Math.min(cellSize * 0.5, cellSize * 0.4 * entityScale);
 
       ctx.save();
@@ -608,18 +680,22 @@
       ctx.ellipse(cx, cy + radius * 0.55, radius * 0.72, radius * 0.22, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      const appleGradient = ctx.createRadialGradient(
-        cx - radius * 0.35,
-        cy - radius * 0.35,
-        radius * 0.15,
-        cx,
-        cy,
-        radius
-      );
-      appleGradient.addColorStop(0, "#ff6b6b");
-      appleGradient.addColorStop(0.45, "#e63946");
-      appleGradient.addColorStop(0.85, "#9d0208");
-      appleGradient.addColorStop(1, "#6a040f");
+      const appleKey = `${food.x}_${food.y}_${cellSize}`;
+      if (appleGradientKey !== appleKey || !appleGradient) {
+        appleGradient = ctx.createRadialGradient(
+          cx - radius * 0.35,
+          cy - radius * 0.35,
+          radius * 0.15,
+          cx,
+          cy,
+          radius
+        );
+        appleGradient.addColorStop(0, "#ff6b6b");
+        appleGradient.addColorStop(0.45, "#e63946");
+        appleGradient.addColorStop(0.85, "#9d0208");
+        appleGradient.addColorStop(1, "#6a040f");
+        appleGradientKey = appleKey;
+      }
 
       ctx.fillStyle = appleGradient;
       ctx.beginPath();
@@ -662,6 +738,10 @@
       ctx.stroke();
 
       ctx.restore();
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
     }
 
     function getSnakePoints(t) {
@@ -733,18 +813,22 @@
       ctx.beginPath();
       ctx.ellipse(headRadius * 0.1, 0, headRadius * 1.06, headRadius * 0.9, 0, 0, Math.PI * 2);
 
-      const headGradient = ctx.createRadialGradient(
-        -headRadius * 0.15,
-        -headRadius * 0.35,
-        headRadius * 0.12,
-        headRadius * 0.15,
-        0,
-        headRadius * 1.1
-      );
-      headGradient.addColorStop(0, "#bbf7d0");
-      headGradient.addColorStop(0.35, "#4ade80");
-      headGradient.addColorStop(0.68, "#16a34a");
-      headGradient.addColorStop(1, "#14532d");
+      const headKey = headRadius.toFixed(2);
+      if (headGradientKey !== headKey || !headGradient) {
+        headGradient = ctx.createRadialGradient(
+          -headRadius * 0.15,
+          -headRadius * 0.35,
+          headRadius * 0.12,
+          headRadius * 0.15,
+          0,
+          headRadius * 1.1
+        );
+        headGradient.addColorStop(0, "#bbf7d0");
+        headGradient.addColorStop(0.35, "#4ade80");
+        headGradient.addColorStop(0.68, "#16a34a");
+        headGradient.addColorStop(1, "#14532d");
+        headGradientKey = headKey;
+      }
       ctx.fillStyle = headGradient;
       ctx.fill();
 
@@ -840,15 +924,13 @@
 
       if (gameState === "playing") {
         accum += delta;
-        while (accum >= tickMs) {
+        if (accum >= tickMs) {
           prevSnake = cloneSnake(snake);
           stepGame();
           accum -= tickMs;
-          if (gameState !== "playing") break;
         }
       } else {
         accum = 0;
-        prevSnake = cloneSnake(snake);
       }
 
       const t = gameState === "playing" ? Math.min(1, accum / tickMs) : 1;
@@ -861,14 +943,14 @@
       gameOverScreen.classList.remove("visible");
       resetRound();
       gameState = "playing";
-      resizeCanvas();
+      resizeCanvas(true);
+      playCellSize = cellSize;
       canvas.focus();
     }
 
     function handleDirectionInput(nx, ny) {
       if (gameState === "start" || gameState === "gameover" || gameState === "win") {
         startGame();
-        return;
       }
       if (gameState === "playing") {
         queueDirection(nx, ny);
@@ -898,12 +980,10 @@
           btn.classList.remove("pressed");
         };
 
-        btn.addEventListener("touchstart", press, { passive: false });
-        btn.addEventListener("touchend", release, { passive: false });
-        btn.addEventListener("touchcancel", release, { passive: false });
-        btn.addEventListener("mousedown", press);
-        btn.addEventListener("mouseup", release);
-        btn.addEventListener("mouseleave", release);
+        btn.addEventListener("pointerdown", press);
+        btn.addEventListener("pointerup", release);
+        btn.addEventListener("pointercancel", release);
+        btn.addEventListener("pointerleave", release);
       });
     }
 
@@ -925,6 +1005,23 @@
 
       if (gameState === "start" && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         startGame();
+        switch (event.key) {
+          case "ArrowUp":
+            queueDirection(0, -1);
+            break;
+          case "ArrowDown":
+            queueDirection(0, 1);
+            break;
+          case "ArrowLeft":
+            queueDirection(-1, 0);
+            break;
+          case "ArrowRight":
+            queueDirection(1, 0);
+            break;
+          default:
+            break;
+        }
+        return;
       }
 
       if (gameState !== "playing") return;
@@ -957,26 +1054,35 @@
 
     let touchStartX = 0;
     let touchStartY = 0;
+    let touchActive = false;
+    const swipeThreshold = () => (isMobileLayout() ? 40 : 24);
 
     canvas.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 1) return;
       event.preventDefault();
-      const touch = event.changedTouches[0];
+      const touch = event.touches[0];
       touchStartX = touch.clientX;
       touchStartY = touch.clientY;
+      touchActive = true;
       if (gameState === "start") startGame();
     }, { passive: false });
 
     canvas.addEventListener("touchend", (event) => {
+      if (!touchActive) return;
       event.preventDefault();
+      touchActive = false;
       if (gameState !== "playing") return;
 
       const touch = event.changedTouches[0];
+      if (!touch) return;
+
       const dxSwipe = touch.clientX - touchStartX;
       const dySwipe = touch.clientY - touchStartY;
       const absX = Math.abs(dxSwipe);
       const absY = Math.abs(dySwipe);
+      const threshold = swipeThreshold();
 
-      if (Math.max(absX, absY) < 24) return;
+      if (Math.max(absX, absY) < threshold) return;
 
       if (absX > absY) {
         queueDirection(dxSwipe > 0 ? 1 : -1, 0);
@@ -985,36 +1091,42 @@
       }
     }, { passive: false });
 
+    canvas.addEventListener("touchcancel", () => {
+      touchActive = false;
+    }, { passive: false });
+
     function handleLayoutChange() {
       clearTimeout(layoutTimer);
       layoutTimer = setTimeout(() => {
         updateMobileCopy();
-        resizeCanvas();
-      }, 120);
+        if (gameState !== "playing" && gameState !== "dying") {
+          configureGrid();
+          resizeCanvas();
+        }
+      }, 200);
     }
 
     window.addEventListener("resize", handleLayoutChange);
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", handleLayoutChange);
-    }
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => {
+        if (gameState !== "playing" && gameState !== "dying") {
+          configureGrid();
+          playCellSize = null;
+          resizeCanvas(true);
+        } else {
+          resizeCanvas(true);
+          playCellSize = cellSize;
+        }
+      }, 250);
+    });
 
     function preventMobileZoom() {
       if (!isMobileLayout()) return;
 
-      const viewportMeta = document.querySelector('meta[name="viewport"]');
-      const lockedViewport =
-        "width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no";
-
+      const gameShell = document.querySelector(".game-shell");
       let lastTouchEnd = 0;
       let lastTouchX = 0;
       let lastTouchY = 0;
-
-      const lockViewportIfZoomed = () => {
-        if (!viewportMeta || !window.visualViewport) return;
-        if (window.visualViewport.scale > 1.01) {
-          viewportMeta.setAttribute("content", lockedViewport);
-        }
-      };
 
       document.addEventListener("gesturestart", (event) => event.preventDefault(), { passive: false });
       document.addEventListener("gesturechange", (event) => event.preventDefault(), { passive: false });
@@ -1042,30 +1154,24 @@
         lastTouchEnd = now;
         lastTouchX = touch.clientX;
         lastTouchY = touch.clientY;
-        lockViewportIfZoomed();
       }, { passive: false });
 
-      document.addEventListener("touchmove", (event) => {
-        event.preventDefault();
-      }, { passive: false });
+      if (gameShell) {
+        gameShell.addEventListener("touchmove", (event) => {
+          event.preventDefault();
+        }, { passive: false });
+      }
 
       document.addEventListener("dblclick", (event) => {
         event.preventDefault();
       }, { passive: false });
-
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener("resize", lockViewportIfZoomed);
-        window.visualViewport.addEventListener("scroll", lockViewportIfZoomed);
-      }
     }
 
     updateMobileCopy();
     preventMobileZoom();
+    configureGrid();
     resizeCanvas();
-    requestAnimationFrame(() => {
-      resizeCanvas();
-      applyMobileCanvasDisplayScale();
-    });
+    requestAnimationFrame(() => resizeCanvas());
     resetRound();
     bindDirectionButtons();
     requestAnimationFrame(gameLoop);
