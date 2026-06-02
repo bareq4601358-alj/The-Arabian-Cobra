@@ -191,31 +191,38 @@
         margin: 0 auto;
         min-height: 100vh;
         min-height: 100dvh;
-        padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+        display: flex;
+        flex-direction: column;
+        padding: max(4px, env(safe-area-inset-top)) max(4px, env(safe-area-inset-right)) max(2px, env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
       }
 
       .game-header {
         width: 100%;
         text-align: center;
+        flex: 0 0 auto;
       }
 
       h1 {
-        font-size: clamp(1.25rem, 4.5vw, 1.6rem);
-        margin-bottom: 6px;
+        font-size: clamp(1.1rem, 4vw, 1.45rem);
+        margin-bottom: 4px;
       }
 
       .hud {
         width: 100%;
-        font-size: clamp(0.9rem, 3.2vw, 1.1rem);
-        margin-bottom: 6px;
+        font-size: clamp(0.85rem, 3vw, 1rem);
+        margin-bottom: 4px;
         padding: 0 2px;
       }
 
       #pauseHint { display: none; }
 
       .board-wrap {
-        flex: 0 1 auto;
-        max-width: 100%;
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 0;
       }
 
       canvas {
@@ -226,8 +233,18 @@
       .controls {
         display: grid;
         flex: 0 0 auto;
-        margin-top: auto;
-        padding-top: 12px;
+        margin-top: 0;
+        padding-top: 8px;
+        grid-template-columns: repeat(3, minmax(58px, 1fr));
+        grid-template-rows: repeat(3, minmax(58px, 1fr));
+        gap: 6px;
+        width: min(100%, 240px);
+      }
+
+      .btn {
+        min-height: 58px;
+        min-width: 58px;
+        font-size: 1.5rem;
       }
     }
   </style>
@@ -340,34 +357,49 @@
       const shell = document.querySelector(".game-shell");
       const header = document.querySelector(".game-header");
       const controls = document.getElementById("mobileControls");
+      const boardWrap = document.querySelector(".board-wrap");
       const shellStyles = shell ? getComputedStyle(shell) : null;
+      const shellPaddingX = shellStyles
+        ? parseFloat(shellStyles.paddingLeft) + parseFloat(shellStyles.paddingRight)
+        : 0;
       const shellPaddingY = shellStyles
         ? parseFloat(shellStyles.paddingTop) + parseFloat(shellStyles.paddingBottom)
         : 0;
       const headerHeight = header ? header.offsetHeight : 0;
       const controlsVisible = controls && getComputedStyle(controls).display !== "none";
-      const controlsHeight = controlsVisible ? controls.offsetHeight + 12 : 0;
+      const controlsHeight = controlsVisible ? controls.offsetHeight + 8 : 0;
+      const viewportWidth = window.visualViewport
+        ? window.visualViewport.width
+        : window.innerWidth;
       const viewportHeight = window.visualViewport
         ? window.visualViewport.height
         : window.innerHeight;
-      const availableHeight = viewportHeight - shellPaddingY - headerHeight - controlsHeight - 12;
-      const availableWidth = (window.visualViewport ? window.visualViewport.width : window.innerWidth) - 24;
+
+      if (boardWrap && boardWrap.clientWidth > 0 && boardWrap.clientHeight > 0) {
+        return {
+          availableWidth: boardWrap.clientWidth - 6,
+          availableHeight: boardWrap.clientHeight - 6,
+        };
+      }
+
       return {
-        availableWidth: Math.max(240, availableWidth),
-        availableHeight: Math.max(180, availableHeight),
+        availableWidth: Math.max(240, viewportWidth - shellPaddingX - 6),
+        availableHeight: Math.max(180, viewportHeight - shellPaddingY - headerHeight - controlsHeight - 4),
       };
     }
 
     function resizeCanvas() {
       if (isMobileLayout()) {
         const { availableWidth, availableHeight } = getMobileLayoutMetrics();
-        const maxWidth = Math.min(availableWidth, 740);
-        const maxHeight = Math.min(availableHeight, 540);
-        cellSize = Math.max(8, Math.floor(Math.min(maxWidth / COLS, maxHeight / ROWS)));
+        cellSize = Math.max(7, Math.floor(Math.min(availableWidth / COLS, availableHeight / ROWS)));
         canvas.width = COLS * cellSize;
         canvas.height = ROWS * cellSize;
         canvas.style.width = `${canvas.width}px`;
         canvas.style.height = `${canvas.height}px`;
+
+        if (document.querySelector(".board-wrap")?.clientHeight === 0) {
+          requestAnimationFrame(resizeCanvas);
+        }
         return;
       }
 
@@ -946,13 +978,21 @@
       }
     }, { passive: false });
 
-    window.addEventListener("resize", () => {
+    function handleLayoutChange() {
       updateMobileCopy();
       resizeCanvas();
-    });
+    }
+
+    window.addEventListener("resize", handleLayoutChange);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", handleLayoutChange);
+    }
 
     updateMobileCopy();
     resizeCanvas();
+    requestAnimationFrame(() => {
+      resizeCanvas();
+    });
     resetRound();
     bindDirectionButtons();
     requestAnimationFrame(gameLoop);
